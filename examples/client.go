@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gojek/heimdall/v7"
-	"github.com/gojek/heimdall/v7/httpclient"
-	"github.com/gojek/heimdall/v7/hystrix"
 	"github.com/pkg/errors"
+	"github.com/psrajat/heimdall/v7"
+	"github.com/psrajat/heimdall/v7/httpclient"
+	"github.com/psrajat/heimdall/v7/hystrix"
 )
 
 const (

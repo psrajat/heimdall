@@ -2,6 +2,7 @@ package hystrix
 
 import (
 	"bytes"
+	"context"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gojek/heimdall/v7"
+	"github.com/psrajat/heimdall/v7"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -430,7 +431,7 @@ func TestHystrixHTTPClientReturnsFallbackFailureWithAFallBackFunctionWhichReturn
 		WithErrorPercentThreshold(10),
 		WithSleepWindow(100),
 		WithRequestVolumeThreshold(10),
-		WithFallbackFunc(func(err error) error {
+		WithFallbackFunc(func(ctx context.Context, err error) error {
 			// do something in the fallback function
 			return err
 		}),
@@ -453,7 +454,7 @@ func TestFallBackFunctionIsCalledWithHystrixHTTPClient(t *testing.T) {
 		WithErrorPercentThreshold(10),
 		WithSleepWindow(100),
 		WithRequestVolumeThreshold(10),
-		WithFallbackFunc(func(err error) error {
+		WithFallbackFunc(func(ctx context.Context, err error) error {
 			called = true
 			return err
 		}),
@@ -474,7 +475,7 @@ func TestHystrixHTTPClientReturnsFallbackFailureWithAFallBackFunctionWhichReturn
 		WithErrorPercentThreshold(10),
 		WithSleepWindow(100),
 		WithRequestVolumeThreshold(10),
-		WithFallbackFunc(func(err error) error {
+		WithFallbackFunc(func(ctx context.Context, err error) error {
 			// do something in the fallback function
 			return nil
 		}),

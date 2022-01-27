@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gojek/heimdall/v7"
 	"github.com/gojek/valkyrie"
 	"github.com/pkg/errors"
+	"github.com/psrajat/heimdall/v7"
 )
 
 // Client is the http client implementation
