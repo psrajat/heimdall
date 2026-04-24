@@ -1,25 +1,22 @@
 package httpclient
 
 import (
-	"bytes"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"time"
 
 	"github.com/gojek/heimdall/v7"
-	"github.com/gojek/valkyrie"
+	"github.com/gojek/heimdall/v7/internal"
 	"github.com/pkg/errors"
 )
 
 // Client is the http client implementation
 type Client struct {
-	client heimdall.Doer
-
-	timeout    time.Duration
-	retryCount int
+	client     heimdall.Doer
 	retrier    heimdall.Retriable
 	plugins    []heimdall.Plugin
+	timeout    time.Duration
+	retryCount int
 }
 
 const (
@@ -122,56 +119,75 @@ func (c *Client) Delete(url string, headers http.Header) (*http.Response, error)
 
 // Do makes an HTTP request with the native `http.Do` interface
 func (c *Client) Do(request *http.Request) (*http.Response, error) {
-	request.Close = true
-
-	var bodyReader *bytes.Reader
-
-	if request.Body != nil {
-		reqData, err := ioutil.ReadAll(request.Body)
-		if err != nil {
-			return nil, err
-		}
-		bodyReader = bytes.NewReader(reqData)
-		request.Body = ioutil.NopCloser(bodyReader) // prevents closing the body between retries
+	if origReqBody := request.Body; origReqBody != nil {
+		defer func() {
+			// close the original request body as internal.SetRequestGetBody wraps body with noop closer.
+			_ = origReqBody.Close()
+		}()
 	}
 
-	multiErr := &valkyrie.MultiError{}
+	var reqGetBody internal.RequestGetBody
+	var err error
+	// Only SetRequestGetBody if retry is enabled to avoid unnecessary overhead for non-retry requests
+	if c.retryCount > 0 {
+		if err = internal.SetRequestGetBody(request); err != nil {
+			return nil, err
+		}
+		// keeping a local variable just in case request.GetBody gets overridden by some plugins/middlewares
+		reqGetBody = request.GetBody
+	}
+
+	var errs []error
 	var response *http.Response
 
 	for i := 0; i <= c.retryCount; i++ {
 		if response != nil {
-			response.Body.Close()
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+		}
+		if i > 0 {
+			if err := internal.SleepInterruptible(request.Context(), c.retrier.NextInterval(i-1)); err != nil {
+				errs = append(errs, err)
+				c.reportError(request, err)
+				// no point of retrying after context has been cancelled
+				break
+			}
+
+			request, err = internal.CloneRequest(request, reqGetBody) // Clone the request to reset the body for retry
+			if err != nil {
+				errs = append(errs, err)
+				c.reportError(request, err)
+				break
+			}
 		}
 
 		c.reportRequestStart(request)
 		var err error
 		response, err = c.client.Do(request)
-		if bodyReader != nil {
-			// Reset the body reader after the request since at this point it's already read
-			// Note that it's safe to ignore the error here since the 0,0 position is always valid
-			_, _ = bodyReader.Seek(0, 0)
-		}
 
 		if err != nil {
-			multiErr.Push(err.Error())
+			errs = append(errs, err)
 			c.reportError(request, err)
-			backoffTime := c.retrier.NextInterval(i)
-			time.Sleep(backoffTime)
+			if internal.IsCtxDone(request.Context()) {
+				break
+			}
 			continue
 		}
 		c.reportRequestEnd(request, response)
 
 		if response.StatusCode >= http.StatusInternalServerError {
-			backoffTime := c.retrier.NextInterval(i)
-			time.Sleep(backoffTime)
+			if internal.IsCtxDone(request.Context()) {
+				break
+			}
+
 			continue
 		}
 
-		multiErr = &valkyrie.MultiError{} // Clear errors if any iteration succeeds
+		errs = nil // Clear errors if any iteration succeeds
 		break
 	}
 
-	return response, multiErr.HasError()
+	return response, internal.BuildMultiError(errs)
 }
 
 func (c *Client) reportRequestStart(request *http.Request) {
